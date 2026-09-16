@@ -21,14 +21,9 @@ _INDEX_DAEMON_ACTION = "ai-dev index daemon lifecycle command"
 _AGENT_MUTATION_ACTION = "ai-dev agent coordination mutation command"
 
 AI_DEV_REVIEW_CASES: tuple[tuple[str, str, str], ...] = (
-    # --- Integrations install --force ---
+    # --- Integrations install --force (and long option prefixes) ---
     (
         "ai-dev integrations install --force",
-        _INSTALL_FORCE_ACTION,
-        "command.ai-dev.integrations-install-force",
-    ),
-    (
-        "ai-dev integrations install -f",
         _INSTALL_FORCE_ACTION,
         "command.ai-dev.integrations-install-force",
     ),
@@ -241,24 +236,21 @@ AI_DEV_WRAPPER_REVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
     ("ai-dev.exe index daemon stop", "command.ai-dev.index-daemon-stop"),
     ("ai-dev.exe agents claim task-123", "command.ai-dev.agents-claim"),
     ("ai-dev.exe agents release task-123", "command.ai-dev.agents-release"),
-    # Python launcher variants (ai_dev and ai_dev_tools)
-    ("python -m ai_dev integrations install --force", "command.ai-dev.integrations-install-force"),
+    # Python launcher variants (verified module: ai_dev_tools)
     ("python -m ai_dev_tools integrations install --force", "command.ai-dev.integrations-install-force"),
-    ("python3 -m ai_dev integrations install --force", "command.ai-dev.integrations-install-force"),
     ("python3 -m ai_dev_tools integrations install --force", "command.ai-dev.integrations-install-force"),
-    ("py -m ai_dev integrations install --force", "command.ai-dev.integrations-install-force"),
     ("py -m ai_dev_tools integrations install --force", "command.ai-dev.integrations-install-force"),
-    ("python -m ai_dev index daemon start", "command.ai-dev.index-daemon-start"),
-    ("python3 -m ai_dev index daemon stop", "command.ai-dev.index-daemon-stop"),
-    ("py -m ai_dev agents claim task-123", "command.ai-dev.agents-claim"),
-    ("python -m ai_dev agents release task-123", "command.ai-dev.agents-release"),
+    ("python -m ai_dev_tools index daemon start", "command.ai-dev.index-daemon-start"),
+    ("python3 -m ai_dev_tools index daemon stop", "command.ai-dev.index-daemon-stop"),
+    ("py -m ai_dev_tools agents claim task-123", "command.ai-dev.agents-claim"),
+    ("python -m ai_dev_tools agents release task-123", "command.ai-dev.agents-release"),
     # Common wrappers: sudo, exec, env, xargs
     ("sudo ai-dev integrations install --force", "command.ai-dev.integrations-install-force"),
     ("exec ai-dev integrations install --force", "command.ai-dev.integrations-install-force"),
     ("env FOO=bar ai-dev integrations install --force", "command.ai-dev.integrations-install-force"),
     ("xargs ai-dev integrations install --force", "command.ai-dev.integrations-install-force"),
     ("xargs -n 1 ai-dev integrations install --force", "command.ai-dev.integrations-install-force"),
-    ("xargs -n 1 python -m ai_dev integrations install --force", "command.ai-dev.integrations-install-force"),
+    ("xargs -n 1 python -m ai_dev_tools integrations install --force", "command.ai-dev.integrations-install-force"),
     ("sudo ai-dev index daemon start", "command.ai-dev.index-daemon-start"),
     ("exec ai-dev index daemon stop", "command.ai-dev.index-daemon-stop"),
     ("sudo ai-dev agents claim task-123", "command.ai-dev.agents-claim"),
@@ -339,9 +331,48 @@ def test_ai_dev_pipeline_and_chained_commands_match_rules(tmp_path: Path) -> Non
         assert expected_rule in matched, f"Expected {expected_rule} for {command!r}, got {matched!r}"
 
 
+def test_ai_dev_force_flag_prefixes_and_short_f_contract(tmp_path: Path) -> None:
+    """Verify long --force prefixes match, but short -f is not recognized as ai-dev force flag."""
+    for flag in ("--force", "--forc", "--for", "--fo", "--f"):
+        command = f"ai-dev integrations install {flag}"
+        observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
+            parse_shell_command(command, cwd=tmp_path, home_dir=tmp_path)
+        )
+        matched = {item.rule.rule_id for item in observations if item.extension.extension_id == "command.ai-dev"}
+        assert "command.ai-dev.integrations-install-force" in matched, (
+            f"Flag {flag!r} should be recognized as force in {command!r}"
+        )
+
+    # -f is an unrecognized short option in ai-dev (not an alias for --force)
+    for command in (
+        "ai-dev integrations install -f",
+        "ai-dev integrations install codex -f",
+    ):
+        observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
+            parse_shell_command(command, cwd=tmp_path, home_dir=tmp_path)
+        )
+        matched = {item.rule.rule_id for item in observations if item.extension.extension_id == "command.ai-dev"}
+        assert "command.ai-dev.integrations-install-force" not in matched, (
+            f"Short flag -f must not be recognized as ai-dev force flag in {command!r}"
+        )
+
+
 def test_ai_dev_safe_commands_remain_safe(tmp_path: Path) -> None:
-    """Read-only and benign commands remain unflagged."""
+    """Read-only and benign commands remain unflagged in policy review."""
     assert_safe_command_cases(AI_DEV_SAFE_COMMANDS, tmp_path)
+    for command in AI_DEV_SAFE_COMMANDS:
+        observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
+            parse_shell_command(command, cwd=tmp_path, home_dir=tmp_path)
+        )
+        unsafe_matches = [
+            item.rule.rule_id
+            for item in observations
+            if item.extension.extension_id == "command.ai-dev"
+            and not (
+                item.safe_variants and {e.segment_index for e in item.matcher_evidence} <= item.safe_segment_indexes
+            )
+        ]
+        assert not unsafe_matches, f"Expected no unsafe ai-dev rule matches for {command!r}, got {unsafe_matches!r}"
 
 
 def test_ai_dev_rules_stay_inert_until_enabled(tmp_path: Path) -> None:
@@ -350,6 +381,21 @@ def test_ai_dev_rules_stay_inert_until_enabled(tmp_path: Path) -> None:
         evaluation = evaluate_command(command, cwd=tmp_path, home_dir=tmp_path)
         assert evaluation.controlling_rule_id != rule_id
         assert all(item.extension.extension_id != "command.ai-dev" for item in evaluation.extension_observations)
+
+
+def test_ai_dev_matcher_evidence_preserves_privacy(tmp_path: Path) -> None:
+    """Evidence emitted by ai-dev matchers does not leak sensitive arguments or secrets."""
+    for command, _action_class, _expected_rule in AI_DEV_REVIEW_CASES:
+        observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
+            parse_shell_command(command, cwd=tmp_path, home_dir=tmp_path)
+        )
+        for observation in observations:
+            if observation.extension.extension_id == "command.ai-dev":
+                for evidence in observation.matcher_evidence:
+                    assert evidence.detail
+                    assert "token" not in evidence.detail.lower()
+                    assert "secret" not in evidence.detail.lower()
+                    assert "password" not in evidence.detail.lower()
 
 
 def test_ai_dev_extension_metadata_and_risk_classes() -> None:

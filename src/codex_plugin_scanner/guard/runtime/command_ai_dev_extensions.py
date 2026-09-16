@@ -38,33 +38,30 @@ from .command_structured_matchers import leading_flags_and_operands
 _AI_DEV_LAUNCHERS: tuple[tuple[str, ...], ...] = (
     ("ai-dev",),
     ("python", "-m", "ai_dev_tools"),
-    ("python", "-m", "ai_dev"),
     ("python3", "-m", "ai_dev_tools"),
-    ("python3", "-m", "ai_dev"),
     ("py", "-m", "ai_dev_tools"),
-    ("py", "-m", "ai_dev"),
     ("exec", "ai-dev"),
     ("exec", "python", "-m", "ai_dev_tools"),
-    ("exec", "python", "-m", "ai_dev"),
     ("exec", "python3", "-m", "ai_dev_tools"),
-    ("exec", "python3", "-m", "ai_dev"),
     ("exec", "py", "-m", "ai_dev_tools"),
-    ("exec", "py", "-m", "ai_dev"),
     ("xargs", "ai-dev"),
     ("xargs", "python", "-m", "ai_dev_tools"),
-    ("xargs", "python", "-m", "ai_dev"),
     ("xargs", "python3", "-m", "ai_dev_tools"),
-    ("xargs", "python3", "-m", "ai_dev"),
     ("xargs", "py", "-m", "ai_dev_tools"),
-    ("xargs", "py", "-m", "ai_dev"),
 )
 _WRAPPER_LEADING_OPTIONS_WITH_VALUES = frozenset({"-n", "-P", "-I", "-L", "-s"})
 _AI_DEV_GLOBAL_OPTIONS_WITH_VALUES = frozenset({"--project"})
 _AI_DEV_GLOBAL_FLAGS = frozenset({"--json", "--quiet"})
 
 # argparse resolves any unambiguous long-option prefix, so every prefix of
-# --force is the destructive flag itself. -f is also recognized as an alias.
-_FORCE_FLAGS: tuple[str, ...] = ("--force", "--forc", "--for", "--fo", "--f", "-f")
+# --force is the destructive flag itself.
+_FORCE_FLAGS: tuple[str, ...] = (
+    "--force",
+    "--forc",
+    "--for",
+    "--fo",
+    "--f",
+)
 _EXPANSION_MARKERS: frozenset[str] = frozenset({"$", "`"})
 
 _AI_DEV_INTEGRATIONS_INSTALL_FORCE = AnyMatcher(
