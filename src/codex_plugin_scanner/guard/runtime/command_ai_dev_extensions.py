@@ -120,7 +120,7 @@ class AiDevUnresolvedExpansionMatcher:
                 continue
             lowered_arguments = tuple(argument.lower() for argument in segment.arguments)
             for launcher in self.launchers:
-                if not _segment_matches_executable(segment, frozenset({launcher[0]})):
+                if not _segment_matches_executable(segment, executable_names(launcher[0])):
                     continue
                 candidate_arguments = lowered_arguments
                 if launcher[0] in ("exec", "xargs"):
@@ -206,7 +206,7 @@ class AiDevIndexDaemonDefaultMatcher:
                 continue
             lowered_arguments = tuple(argument.lower() for argument in segment.arguments)
             for launcher in self.launchers:
-                if not _segment_matches_executable(segment, frozenset({launcher[0]})):
+                if not _segment_matches_executable(segment, executable_names(launcher[0])):
                     continue
                 candidate_arguments = lowered_arguments
                 if launcher[0] in ("exec", "xargs"):
@@ -267,7 +267,7 @@ class AiDevIndexDaemonExpansionMatcher:
                 continue
             lowered_arguments = tuple(argument.lower() for argument in segment.arguments)
             for launcher in self.launchers:
-                if not _segment_matches_executable(segment, frozenset({launcher[0]})):
+                if not _segment_matches_executable(segment, executable_names(launcher[0])):
                     continue
                 candidate_arguments = lowered_arguments
                 if launcher[0] in ("exec", "xargs"):
@@ -285,6 +285,8 @@ class AiDevIndexDaemonExpansionMatcher:
                 if candidate_arguments[: len(prefix)] != prefix:
                     continue
                 remaining_arguments = candidate_arguments[len(prefix) :]
+                if any(argument in ("-h", "--help") for argument in remaining_arguments):
+                    break
                 flags, operands = leading_flags_and_operands(
                     remaining_arguments,
                     options_with_values=self.daemon_options_with_values,

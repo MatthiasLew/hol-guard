@@ -240,7 +240,10 @@ AI_DEV_REVIEW_CASES: tuple[tuple[str, str, str], ...] = (
 AI_DEV_WRAPPER_REVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
     # Executable suffixes
     ("ai-dev.exe integrations install --force", "command.ai-dev.integrations-install-force"),
+    ("ai-dev.exe integrations install $FORCE", "command.ai-dev.integrations-install-force"),
     ("ai-dev.exe index daemon start", "command.ai-dev.index-daemon-start"),
+    ("ai-dev.exe index daemon", "command.ai-dev.index-daemon-start"),
+    ("ai-dev.exe index daemon $ACTION", "command.ai-dev.index-daemon-start"),
     ("ai-dev.exe index daemon stop", "command.ai-dev.index-daemon-stop"),
     ("ai-dev.exe agents claim task-123", "command.ai-dev.agents-claim"),
     ("ai-dev.exe agents release task-123", "command.ai-dev.agents-release"),
@@ -374,6 +377,11 @@ def test_ai_dev_help_with_expansion_arguments_remains_safe(tmp_path: Path) -> No
         "python -m ai_dev_tools integrations install --help $(echo --force)",
         "ai-dev index daemon start --help $ACTION",
         "ai-dev index daemon --help $ACTION",
+        "ai-dev index daemon $ACTION --help",
+        "ai-dev index daemon ${ACTION} -h",
+        "python -m ai_dev_tools index daemon $ACTION --help",
+        "exec ai-dev index daemon ${ACTION} -h",
+        "xargs ai-dev index daemon $ACTION --help",
     )
     for command in safe_help_expansion_cases:
         observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
@@ -389,22 +397,24 @@ def test_ai_dev_help_with_expansion_arguments_remains_safe(tmp_path: Path) -> No
             )
         ]
         assert not unsafe_matches, f"Expected no unsafe ai-dev rule matches for {command!r}, got {unsafe_matches!r}"
-        assert "command.ai-dev.integrations-install-force" not in ai_dev_rules, (
-            f"Integrations force rule should not match help invocation: {command!r}"
-        )
 
     # Normal fail-secure behavior for non-help expansion must remain intact
     non_help_expansions = (
-        "ai-dev integrations install codex $FORCE_FLAG",
-        "ai-dev integrations install $FORCE_FLAG",
+        ("ai-dev integrations install codex $FORCE_FLAG", "command.ai-dev.integrations-install-force"),
+        ("ai-dev integrations install $FORCE_FLAG", "command.ai-dev.integrations-install-force"),
+        ("ai-dev index daemon $ACTION", "command.ai-dev.index-daemon-start"),
+        ("ai-dev index daemon ${ACTION}", "command.ai-dev.index-daemon-start"),
+        ("python -m ai_dev_tools index daemon $ACTION", "command.ai-dev.index-daemon-start"),
+        ("exec ai-dev index daemon $ACTION", "command.ai-dev.index-daemon-start"),
+        ("xargs ai-dev index daemon $ACTION", "command.ai-dev.index-daemon-start"),
     )
-    for command in non_help_expansions:
+    for command, expected_rule in non_help_expansions:
         observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
             parse_shell_command(command, cwd=tmp_path, home_dir=tmp_path)
         )
         ai_dev_rules = {item.rule.rule_id for item in observations if item.extension.extension_id == "command.ai-dev"}
-        assert "command.ai-dev.integrations-install-force" in ai_dev_rules, (
-            f"Expansion without help must be reviewed: {command!r}"
+        assert expected_rule in ai_dev_rules, (
+            f"Expansion without help must be reviewed: {command!r} expected {expected_rule}"
         )
 
 
@@ -593,3 +603,20 @@ def test_ai_dev_candidate_indexing_filters_unrelated_commands() -> None:
         parse_shell_command("ai-dev integrations install --force")
     )
     assert "command.ai-dev.integrations-install-force" in install_candidates
+
+
+def test_ai_dev_frozen_packaging_parity() -> None:
+    """Ensure command.ai-dev contribution manifest is included in frozen artifact staging."""
+    import importlib.util
+
+    script_path = Path(__file__).resolve().parents[1] / "scripts/release/stage_guard_cloud_review_artifacts.py"
+    spec = importlib.util.spec_from_file_location("stage_guard_cloud_review_artifacts", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert "contributions/extensions/command.ai-dev.json" in module._ARTIFACTS
+    assert (
+        module._ARTIFACTS["contributions/extensions/command.ai-dev.json"]
+        == "extensions/contributions/command.ai-dev.json"
+    )
