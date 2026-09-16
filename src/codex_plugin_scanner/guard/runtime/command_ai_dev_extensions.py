@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .command_extension_matchers import executable_matcher, safe_flag_variant
+from .command_extension_matchers import executable_matcher, executable_names, safe_flag_variant
 from .command_extension_specs import CommandExtensionSpec
-from .command_matcher_contracts import MatcherEvidence
+from .command_launcher_floors import _XARGS_VALUE_OPTIONS
+from .command_matcher_contracts import CommandMatcher, MatcherEvidence
 from .command_model import CanonicalCommand
 from .command_rules import (
     AnyMatcher,
@@ -27,13 +28,8 @@ from .command_structured_matchers import leading_flags_and_operands
 #   These may precede, be interspersed within, or follow subcommands.
 # - Module invocation (`python/-m ai_dev_tools ...`) enforces the module name as
 #   literal subcommand tokens because option-value tracking does not retain `-m` values.
-#
-# Conservative matching covers:
-# - Standard launcher variants: ai-dev, python -m ai_dev_tools, python3 -m ai_dev_tools, py -m ai_dev_tools
-# - Shell wrappers: exec ai-dev ..., xargs ai-dev ...
-# - Flag abbreviations: Python argparse accepts unambiguous prefixes (--f, --fo, ..., --force)
-# - Unresolved shell expansions ($VAR, ${VAR}, $(...), backticks) that may supply --force
-# - Fail-secure option parsing: unknown options prevent unsafe dry-run / preview bypasses
+# - Wrappers like xargs and exec strip leading value options via canonical xargs option grammar.
+# - Shell expansions ($VAR, ${VAR}, $(...), backticks) fail-secure to review unless help is requested.
 
 _AI_DEV_LAUNCHERS: tuple[tuple[str, ...], ...] = (
     ("ai-dev",),
@@ -49,7 +45,19 @@ _AI_DEV_LAUNCHERS: tuple[tuple[str, ...], ...] = (
     ("xargs", "python3", "-m", "ai_dev_tools"),
     ("xargs", "py", "-m", "ai_dev_tools"),
 )
-_WRAPPER_LEADING_OPTIONS_WITH_VALUES = frozenset({"-n", "-P", "-I", "-L", "-s"})
+
+_EXEC_VALUE_OPTIONS: frozenset[str] = frozenset({"-a"})
+
+
+def _wrapper_leading_options(launcher_head: str) -> frozenset[str]:
+    """Return leading value-consuming option names for wrapper executables like xargs and exec."""
+    if launcher_head == "xargs":
+        return _XARGS_VALUE_OPTIONS
+    if launcher_head == "exec":
+        return _EXEC_VALUE_OPTIONS
+    return frozenset()
+
+
 _AI_DEV_GLOBAL_OPTIONS_WITH_VALUES = frozenset({"--project"})
 _AI_DEV_GLOBAL_FLAGS = frozenset({"--json", "--quiet"})
 
@@ -74,9 +82,7 @@ _AI_DEV_INTEGRATIONS_INSTALL_FORCE = AnyMatcher(
             global_options_with_values=_AI_DEV_GLOBAL_OPTIONS_WITH_VALUES,
             global_flags=_AI_DEV_GLOBAL_FLAGS,
             allow_leading_options=launcher[0] in ("exec", "xargs"),
-            leading_options_with_values=(
-                _WRAPPER_LEADING_OPTIONS_WITH_VALUES if launcher[0] in ("exec", "xargs") else frozenset()
-            ),
+            leading_options_with_values=_wrapper_leading_options(launcher[0]),
             fail_secure_unknown_options=True,
         )
         for launcher in _AI_DEV_LAUNCHERS
@@ -91,17 +97,18 @@ class AiDevUnresolvedExpansionMatcher:
 
     A `$VAR`, `${VAR}`, `$(...)`, or backtick token can expand to `--force` at
     execution time, so its presence in an `integrations install` invocation means the
-    destructive flag cannot be proven absent.
+    destructive flag cannot be proven absent. Invocations that explicitly request
+    help (-h/--help) are safe and excluded from expansion matching.
     """
 
     subcommands: tuple[str, ...] = ("integrations", "install")
     launchers: tuple[tuple[str, ...], ...] = _AI_DEV_LAUNCHERS
-    leading_options_with_values: frozenset[str] = _WRAPPER_LEADING_OPTIONS_WITH_VALUES
     global_options_with_values: frozenset[str] = _AI_DEV_GLOBAL_OPTIONS_WITH_VALUES
     global_flags: frozenset[str] = _AI_DEV_GLOBAL_FLAGS
     expansion_markers: frozenset[str] = _EXPANSION_MARKERS
 
     def match(self, command: CanonicalCommand) -> tuple[MatcherEvidence, ...]:
+        """Detect unresolved shell expansion tokens within ai-dev integrations install invocations."""
         evidence: list[MatcherEvidence] = []
         for index, segment in enumerate(command.segments):
             if segment.executable is None:
@@ -114,7 +121,7 @@ class AiDevUnresolvedExpansionMatcher:
                 if launcher[0] in ("exec", "xargs"):
                     candidate_arguments = _after_leading_options(
                         candidate_arguments,
-                        self.leading_options_with_values,
+                        _wrapper_leading_options(launcher[0]),
                         frozenset(),
                     )
                 candidate_arguments = _without_options(
@@ -126,6 +133,8 @@ class AiDevUnresolvedExpansionMatcher:
                 if candidate_arguments[: len(prefix)] != prefix:
                     continue
                 remaining_arguments = candidate_arguments[len(prefix) :]
+                if any(argument in ("-h", "--help") for argument in remaining_arguments):
+                    break
                 if any(
                     any(marker in argument for marker in self.expansion_markers) for argument in remaining_arguments
                 ):
@@ -155,9 +164,7 @@ _AI_DEV_INDEX_DAEMON_START_EXPLICIT = AnyMatcher(
             global_flags=_AI_DEV_GLOBAL_FLAGS,
             options_with_values=frozenset({"--poll", "--max-updates", "--idle-timeout"}),
             allow_leading_options=launcher[0] in ("exec", "xargs"),
-            leading_options_with_values=(
-                _WRAPPER_LEADING_OPTIONS_WITH_VALUES if launcher[0] in ("exec", "xargs") else frozenset()
-            ),
+            leading_options_with_values=_wrapper_leading_options(launcher[0]),
             fail_secure_unknown_options=True,
         )
         for launcher in _AI_DEV_LAUNCHERS
@@ -175,12 +182,12 @@ class AiDevIndexDaemonDefaultMatcher:
 
     subcommands: tuple[str, ...] = ("index", "daemon")
     launchers: tuple[tuple[str, ...], ...] = _AI_DEV_LAUNCHERS
-    leading_options_with_values: frozenset[str] = _WRAPPER_LEADING_OPTIONS_WITH_VALUES
     global_options_with_values: frozenset[str] = _AI_DEV_GLOBAL_OPTIONS_WITH_VALUES
     global_flags: frozenset[str] = _AI_DEV_GLOBAL_FLAGS
     daemon_options_with_values: frozenset[str] = frozenset({"--poll", "--max-updates", "--idle-timeout"})
 
     def match(self, command: CanonicalCommand) -> tuple[MatcherEvidence, ...]:
+        """Detect default start invocations of ai-dev index daemon without an action operand."""
         evidence: list[MatcherEvidence] = []
         for index, segment in enumerate(command.segments):
             if segment.executable is None:
@@ -193,7 +200,7 @@ class AiDevIndexDaemonDefaultMatcher:
                 if launcher[0] in ("exec", "xargs"):
                     candidate_arguments = _after_leading_options(
                         candidate_arguments,
-                        self.leading_options_with_values,
+                        _wrapper_leading_options(launcher[0]),
                         frozenset(),
                     )
                 candidate_arguments = _without_options(
@@ -229,18 +236,19 @@ class AiDevIndexDaemonExpansionMatcher:
 
     A `$VAR`, `${VAR}`, `$(...)`, or backtick token in the daemon-action position
     may expand to `start` or `stop` at execution time, so its presence means the
-    intended action cannot be proven safe.
+    intended action cannot be proven safe. Invocations that explicitly request help
+    (-h/--help) are safe and excluded.
     """
 
     subcommands: tuple[str, ...] = ("index", "daemon")
     launchers: tuple[tuple[str, ...], ...] = _AI_DEV_LAUNCHERS
-    leading_options_with_values: frozenset[str] = _WRAPPER_LEADING_OPTIONS_WITH_VALUES
     global_options_with_values: frozenset[str] = _AI_DEV_GLOBAL_OPTIONS_WITH_VALUES
     global_flags: frozenset[str] = _AI_DEV_GLOBAL_FLAGS
     daemon_options_with_values: frozenset[str] = frozenset({"--poll", "--max-updates", "--idle-timeout"})
     expansion_markers: frozenset[str] = _EXPANSION_MARKERS
 
     def match(self, command: CanonicalCommand) -> tuple[MatcherEvidence, ...]:
+        """Detect unresolved shell expansion tokens in the ai-dev index daemon action operand position."""
         evidence: list[MatcherEvidence] = []
         for index, segment in enumerate(command.segments):
             if segment.executable is None:
@@ -253,7 +261,7 @@ class AiDevIndexDaemonExpansionMatcher:
                 if launcher[0] in ("exec", "xargs"):
                     candidate_arguments = _after_leading_options(
                         candidate_arguments,
-                        self.leading_options_with_values,
+                        _wrapper_leading_options(launcher[0]),
                         frozenset(),
                     )
                 candidate_arguments = _without_options(
@@ -285,6 +293,21 @@ class AiDevIndexDaemonExpansionMatcher:
         return tuple(evidence)
 
 
+def ai_dev_matcher_index_hints(matcher: CommandMatcher) -> tuple[frozenset[str], frozenset[str]] | None:
+    """Return conservative registry executable and keyword hints for custom ai-dev matchers."""
+    if isinstance(
+        matcher,
+        (
+            AiDevUnresolvedExpansionMatcher,
+            AiDevIndexDaemonDefaultMatcher,
+            AiDevIndexDaemonExpansionMatcher,
+        ),
+    ):
+        executables = frozenset(name for launcher in matcher.launchers for name in executable_names(launcher[0]))
+        return executables, frozenset(matcher.subcommands)
+    return None
+
+
 _AI_DEV_INDEX_DAEMON_START = AnyMatcher(
     matchers=(
         *_AI_DEV_INDEX_DAEMON_START_EXPLICIT.matchers,
@@ -303,9 +326,7 @@ _AI_DEV_INDEX_DAEMON_STOP = AnyMatcher(
             global_options_with_values=_AI_DEV_GLOBAL_OPTIONS_WITH_VALUES,
             global_flags=_AI_DEV_GLOBAL_FLAGS,
             allow_leading_options=launcher[0] in ("exec", "xargs"),
-            leading_options_with_values=(
-                _WRAPPER_LEADING_OPTIONS_WITH_VALUES if launcher[0] in ("exec", "xargs") else frozenset()
-            ),
+            leading_options_with_values=_wrapper_leading_options(launcher[0]),
             fail_secure_unknown_options=True,
         )
         for launcher in _AI_DEV_LAUNCHERS
@@ -322,9 +343,7 @@ _AI_DEV_AGENTS_CLAIM = AnyMatcher(
             global_flags=_AI_DEV_GLOBAL_FLAGS,
             options_with_values=frozenset({"--agent", "--lease-seconds"}),
             allow_leading_options=launcher[0] in ("exec", "xargs"),
-            leading_options_with_values=(
-                _WRAPPER_LEADING_OPTIONS_WITH_VALUES if launcher[0] in ("exec", "xargs") else frozenset()
-            ),
+            leading_options_with_values=_wrapper_leading_options(launcher[0]),
             fail_secure_unknown_options=True,
         )
         for launcher in _AI_DEV_LAUNCHERS
@@ -341,9 +360,7 @@ _AI_DEV_AGENTS_RELEASE = AnyMatcher(
             global_flags=_AI_DEV_GLOBAL_FLAGS,
             options_with_values=frozenset({"--agent"}),
             allow_leading_options=launcher[0] in ("exec", "xargs"),
-            leading_options_with_values=(
-                _WRAPPER_LEADING_OPTIONS_WITH_VALUES if launcher[0] in ("exec", "xargs") else frozenset()
-            ),
+            leading_options_with_values=_wrapper_leading_options(launcher[0]),
             fail_secure_unknown_options=True,
         )
         for launcher in _AI_DEV_LAUNCHERS
@@ -358,16 +375,12 @@ AI_DEV_COMMAND_RULES = (
             "Identifies `ai-dev integrations install --force`, which overwrites or "
             "mutates existing IDE and agent configuration files (.codex/config.toml, "
             ".cursor/mcp.json, .gemini/settings.json, .mcp.json). Invocations carrying "
-            "unresolved shell expansions are reviewed because they cannot prove --force "
-            "absent."
+            "shell expansions fail secure to review unless help is explicitly requested."
         ),
         severity="high",
         risk_classes=("destructive_shell",),
         action_classes=("ai-dev forced integration config overwrite command",),
-        safer_alternatives=(
-            "Run ai-dev integrations install without --force to preserve existing IDE configurations.",
-            "Confirm existing .codex, .cursor, .gemini, or .mcp.json files are backed up before forcing.",
-        ),
+        safer_alternatives=("Run ai-dev integrations install without --force to preserve existing configurations.",),
         matcher=_AI_DEV_INTEGRATIONS_INSTALL_FORCE_WITH_EXPANSIONS,
         default_mode="review",
         safe_variants=(
@@ -381,40 +394,37 @@ AI_DEV_COMMAND_RULES = (
     ),
     CommandSafetyRule(
         rule_id="command.ai-dev.index-daemon-start",
-        title="ai-dev index daemon background start",
+        title="ai-dev background index daemon launch",
         description=(
-            "Identifies `ai-dev index daemon start` invocations that spawn a detached "
-            "background watcher process and open a localhost TCP control socket."
+            "Identifies `ai-dev index daemon start` or bare `ai-dev index daemon`, "
+            "which spawns a persistent background filesystem watcher and index daemon."
         ),
         severity="medium",
         risk_classes=("execution",),
         action_classes=("ai-dev index daemon lifecycle command",),
-        safer_alternatives=(
-            "Check running daemon state with ai-dev index daemon status before starting.",
-            "Run a one-shot repository index with ai-dev index update instead of a persistent daemon.",
-        ),
+        safer_alternatives=("Check status first with ai-dev index daemon status before starting.",),
         matcher=_AI_DEV_INDEX_DAEMON_START,
         default_mode="review",
         safe_variants=(
             safe_flag_variant(
                 _AI_DEV_INDEX_DAEMON_START_EXPLICIT,
                 variant_id="help",
-                title="ai-dev index daemon help",
+                title="ai-dev index daemon start help",
                 flag="--help",
             ),
         ),
     ),
     CommandSafetyRule(
         rule_id="command.ai-dev.index-daemon-stop",
-        title="ai-dev index daemon termination",
+        title="ai-dev background index daemon termination",
         description=(
-            "Identifies `ai-dev index daemon stop` invocations that signal and terminate "
-            "the background repository index watcher process."
+            "Identifies `ai-dev index daemon stop`, which terminates the background "
+            "watcher daemon process and cleans up its IPC socket."
         ),
         severity="medium",
         risk_classes=("destructive_shell", "execution"),
         action_classes=("ai-dev index daemon lifecycle command",),
-        safer_alternatives=("Query daemon health with ai-dev index daemon status before stopping.",),
+        safer_alternatives=("Check running status with ai-dev index daemon status before stopping.",),
         matcher=_AI_DEV_INDEX_DAEMON_STOP,
         default_mode="review",
         safe_variants=(
@@ -428,15 +438,15 @@ AI_DEV_COMMAND_RULES = (
     ),
     CommandSafetyRule(
         rule_id="command.ai-dev.agents-claim",
-        title="ai-dev multi-agent task lock claim",
+        title="ai-dev multi-agent task lock acquisition",
         description=(
-            "Identifies `ai-dev agents claim` invocations that place an exclusive lease lock "
-            "on shared tasks and file paths in the coordination state."
+            "Identifies `ai-dev agents claim` invocations that mutate task state by "
+            "claiming exclusive lease locks for a specific agent ID."
         ),
         severity="medium",
         risk_classes=("destructive_shell",),
         action_classes=("ai-dev agent coordination mutation command",),
-        safer_alternatives=("Inspect active agent locks with ai-dev agents status before claiming.",),
+        safer_alternatives=("Inspect existing task assignments with ai-dev agents status before claiming.",),
         matcher=_AI_DEV_AGENTS_CLAIM,
         default_mode="review",
         safe_variants=(

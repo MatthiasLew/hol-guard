@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from codex_plugin_scanner.guard.runtime.command_evaluation import evaluate_command
@@ -357,6 +358,105 @@ def test_ai_dev_force_flag_prefixes_and_short_f_contract(tmp_path: Path) -> None
         )
 
 
+def test_ai_dev_help_with_expansion_arguments_remains_safe(tmp_path: Path) -> None:
+    """Explicit help requests override and suppress unresolved shell expansion matching."""
+    safe_help_expansion_cases = (
+        "ai-dev integrations install --help $ARG",
+        'ai-dev integrations install --help "$ARG"',
+        "ai-dev integrations install -h ${ARG}",
+        "python -m ai_dev_tools integrations install --help $(echo --force)",
+        "ai-dev index daemon start --help $ACTION",
+        "ai-dev index daemon --help $ACTION",
+    )
+    for command in safe_help_expansion_cases:
+        observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
+            parse_shell_command(command, cwd=tmp_path, home_dir=tmp_path)
+        )
+        ai_dev_rules = {item.rule.rule_id for item in observations if item.extension.extension_id == "command.ai-dev"}
+        unsafe_matches = [
+            item.rule.rule_id
+            for item in observations
+            if item.extension.extension_id == "command.ai-dev"
+            and not (
+                item.safe_variants and {e.segment_index for e in item.matcher_evidence} <= item.safe_segment_indexes
+            )
+        ]
+        assert not unsafe_matches, f"Expected no unsafe ai-dev rule matches for {command!r}, got {unsafe_matches!r}"
+        assert "command.ai-dev.integrations-install-force" not in ai_dev_rules, (
+            f"Integrations force rule should not match help invocation: {command!r}"
+        )
+
+    # Normal fail-secure behavior for non-help expansion must remain intact
+    non_help_expansions = (
+        "ai-dev integrations install codex $FORCE_FLAG",
+        "ai-dev integrations install $FORCE_FLAG",
+    )
+    for command in non_help_expansions:
+        observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
+            parse_shell_command(command, cwd=tmp_path, home_dir=tmp_path)
+        )
+        ai_dev_rules = {item.rule.rule_id for item in observations if item.extension.extension_id == "command.ai-dev"}
+        assert "command.ai-dev.integrations-install-force" in ai_dev_rules, (
+            f"Expansion without help must be reviewed: {command!r}"
+        )
+
+
+def test_ai_dev_candidate_rule_ids_indexing() -> None:
+    """Registry indexing excludes ai-dev rules from completely unrelated commands."""
+    assert not any("ai-dev" in r for r in BUILT_IN_COMMAND_EXTENSION_REGISTRY._unindexed_rule_ids)
+
+    unrelated_commands = (
+        "git status",
+        "npm test",
+        "cargo build",
+        "echo hello world",
+    )
+    for command in unrelated_commands:
+        candidates = BUILT_IN_COMMAND_EXTENSION_REGISTRY.candidate_rule_ids(parse_shell_command(command))
+        ai_dev_candidates = [r for r in candidates if "ai-dev" in r]
+        assert not ai_dev_candidates, (
+            f"Unrelated command {command!r} should not index ai-dev candidate rules, got: {ai_dev_candidates!r}"
+        )
+
+
+def test_ai_dev_xargs_option_variants(tmp_path: Path) -> None:
+    """Xargs invocations with value-consuming options properly match sensitive commands."""
+    xargs_review_cases = (
+        ("xargs --max-procs 2 ai-dev integrations install --force", "command.ai-dev.integrations-install-force"),
+        ("xargs -P 2 ai-dev integrations install --force", "command.ai-dev.integrations-install-force"),
+        ("xargs --arg-file input ai-dev integrations install --force", "command.ai-dev.integrations-install-force"),
+        ("xargs -a input ai-dev index daemon start", "command.ai-dev.index-daemon-start"),
+        ("xargs -n 1 ai-dev agents claim task-1 --agent bot", "command.ai-dev.agents-claim"),
+    )
+    for command, expected_rule in xargs_review_cases:
+        observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
+            parse_shell_command(command, cwd=tmp_path, home_dir=tmp_path)
+        )
+        matched = {item.rule.rule_id for item in observations if item.extension.extension_id == "command.ai-dev"}
+        assert expected_rule in matched, f"Expected {expected_rule} for {command!r}, got {matched!r}"
+
+    xargs_safe_cases = (
+        "xargs --max-procs 2 ai-dev integrations install",
+        "xargs -a input ai-dev index daemon status",
+        "xargs -n 1 ai-dev agents list",
+    )
+    for command in xargs_safe_cases:
+        observations = BUILT_IN_COMMAND_EXTENSION_REGISTRY.observations(
+            parse_shell_command(command, cwd=tmp_path, home_dir=tmp_path)
+        )
+        unsafe_matches = [
+            item.rule.rule_id
+            for item in observations
+            if item.extension.extension_id == "command.ai-dev"
+            and not (
+                item.safe_variants and {e.segment_index for e in item.matcher_evidence} <= item.safe_segment_indexes
+            )
+        ]
+        assert not unsafe_matches, (
+            f"Expected no unsafe ai-dev rule matches for safe xargs {command!r}, got {unsafe_matches!r}"
+        )
+
+
 def test_ai_dev_safe_commands_remain_safe(tmp_path: Path) -> None:
     """Read-only and benign commands remain unflagged in policy review."""
     assert_safe_command_cases(AI_DEV_SAFE_COMMANDS, tmp_path)
@@ -410,7 +510,17 @@ def test_ai_dev_extension_metadata_and_risk_classes() -> None:
     payload = next(item for item in load_contribution_payloads() if item.get("id") == "command.ai-dev")
     assert payload["activation"] == "opt-in"
     assert payload["trustClass"] == "external"
+    assert payload["publisher"]["displayName"] == "ai-dev community"
+    assert payload["icon"]["background"] == "#2563EB"
 
     assert risk_classes_for_command_action(_INSTALL_FORCE_ACTION) == ("destructive_shell",)
     assert risk_classes_for_command_action(_INDEX_DAEMON_ACTION) == ("destructive_shell", "execution")
     assert risk_classes_for_command_action(_AGENT_MUTATION_ACTION) == ("destructive_shell",)
+
+    # Verify presence in generated public catalog
+    catalog_path = Path(__file__).resolve().parents[1] / "docs/guard/extensions/catalog.v1.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog_entry = next((e for e in catalog["entries"] if e["id"] == "command.ai-dev"), None)
+    assert catalog_entry is not None
+    assert catalog_entry["protectionModel"] == "external-opt-in"
+    assert len(catalog_entry["operations"]) == 5

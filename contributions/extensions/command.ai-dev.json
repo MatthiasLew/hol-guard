@@ -8,10 +8,10 @@
   "activation": "opt-in",
   "publisher": {
     "id": "community.ai-dev",
-    "displayName": "Community",
+    "displayName": "ai-dev community",
     "url": "https://github.com/MatthiasLew/ai-dev-cli-tools"
   },
-  "icon": { "kind": "react-icon", "name": "HiMiniCommandLine", "background": "#4338CA" },
+  "icon": { "kind": "react-icon", "name": "HiMiniCommandLine", "background": "#2563EB" },
   "homepage": "https://github.com/MatthiasLew/ai-dev-cli-tools",
   "license": "MIT",
   "executables": ["ai-dev"],
