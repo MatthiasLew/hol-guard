@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from .command_extension_matchers import executable_matcher, executable_names, safe_flag_variant
 from .command_extension_specs import CommandExtensionSpec
 from .command_launcher_floors import _XARGS_VALUE_OPTIONS
-from .command_matcher_contracts import CommandMatcher, MatcherEvidence
+from .command_matcher_contracts import MatcherEvidence
 from .command_model import CanonicalCommand
 from .command_rules import (
     AnyMatcher,
     CommandSafetyRule,
+    IndexedCommandMatcher,
     _after_leading_options,
     _segment_matches_executable,
     _without_options,
@@ -44,6 +45,10 @@ _AI_DEV_LAUNCHERS: tuple[tuple[str, ...], ...] = (
     ("xargs", "python", "-m", "ai_dev_tools"),
     ("xargs", "python3", "-m", "ai_dev_tools"),
     ("xargs", "py", "-m", "ai_dev_tools"),
+)
+
+_AI_DEV_LAUNCHER_EXECUTABLES: frozenset[str] = frozenset(
+    name for launcher in _AI_DEV_LAUNCHERS for name in executable_names(launcher[0])
 )
 
 _EXEC_VALUE_OPTIONS: frozenset[str] = frozenset({"-a"})
@@ -150,7 +155,14 @@ class AiDevUnresolvedExpansionMatcher:
 
 
 _AI_DEV_INTEGRATIONS_INSTALL_FORCE_WITH_EXPANSIONS = AnyMatcher(
-    matchers=(*_AI_DEV_INTEGRATIONS_INSTALL_FORCE.matchers, AiDevUnresolvedExpansionMatcher()),
+    matchers=(
+        *_AI_DEV_INTEGRATIONS_INSTALL_FORCE.matchers,
+        IndexedCommandMatcher(
+            matcher=AiDevUnresolvedExpansionMatcher(),
+            executables=_AI_DEV_LAUNCHER_EXECUTABLES,
+            keywords=frozenset({"integrations", "install"}),
+        ),
+    ),
 )
 
 _AI_DEV_INDEX_DAEMON_START_EXPLICIT = AnyMatcher(
@@ -293,26 +305,19 @@ class AiDevIndexDaemonExpansionMatcher:
         return tuple(evidence)
 
 
-def ai_dev_matcher_index_hints(matcher: CommandMatcher) -> tuple[frozenset[str], frozenset[str]] | None:
-    """Return conservative registry executable and keyword hints for custom ai-dev matchers."""
-    if isinstance(
-        matcher,
-        (
-            AiDevUnresolvedExpansionMatcher,
-            AiDevIndexDaemonDefaultMatcher,
-            AiDevIndexDaemonExpansionMatcher,
-        ),
-    ):
-        executables = frozenset(name for launcher in matcher.launchers for name in executable_names(launcher[0]))
-        return executables, frozenset(matcher.subcommands)
-    return None
-
-
 _AI_DEV_INDEX_DAEMON_START = AnyMatcher(
     matchers=(
         *_AI_DEV_INDEX_DAEMON_START_EXPLICIT.matchers,
-        AiDevIndexDaemonDefaultMatcher(),
-        AiDevIndexDaemonExpansionMatcher(),
+        IndexedCommandMatcher(
+            matcher=AiDevIndexDaemonDefaultMatcher(),
+            executables=_AI_DEV_LAUNCHER_EXECUTABLES,
+            keywords=frozenset({"index", "daemon"}),
+        ),
+        IndexedCommandMatcher(
+            matcher=AiDevIndexDaemonExpansionMatcher(),
+            executables=_AI_DEV_LAUNCHER_EXECUTABLES,
+            keywords=frozenset({"index", "daemon"}),
+        ),
     )
 )
 

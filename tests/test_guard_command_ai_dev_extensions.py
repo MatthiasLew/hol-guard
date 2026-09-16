@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
+from codex_plugin_scanner.guard.runtime import command_structured_matchers as csm
 from codex_plugin_scanner.guard.runtime.command_evaluation import evaluate_command
 from codex_plugin_scanner.guard.runtime.command_extensions import (
     BUILT_IN_COMMAND_EXTENSION_REGISTRY,
     risk_classes_for_command_action,
 )
+from codex_plugin_scanner.guard.runtime.command_matcher_contracts import MatcherEvidence
 from codex_plugin_scanner.guard.runtime.command_model import parse_shell_command
+from codex_plugin_scanner.guard.runtime.command_rules import (
+    IndexedCommandMatcher,
+    matcher_index_hints,
+)
 from codex_plugin_scanner.guard.runtime.extension_contribution import load_contribution_payloads
 from codex_plugin_scanner.guard.runtime.extension_trust import ids_for_class
 from tests.command_extension_contracts import (
@@ -524,3 +531,65 @@ def test_ai_dev_extension_metadata_and_risk_classes() -> None:
     assert catalog_entry is not None
     assert catalog_entry["protectionModel"] == "external-opt-in"
     assert len(catalog_entry["operations"]) == 5
+
+
+def test_command_structured_matchers_does_not_import_ai_dev() -> None:
+    """Architecture test: core structured matchers must not import external extensions."""
+    source_path = Path(csm.__file__)
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert "ai_dev" not in alias.name, f"Forbidden import: {alias.name}"
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            assert "ai_dev" not in module, f"Forbidden import from: {module}"
+            for alias in node.names:
+                assert "ai_dev" not in alias.name, f"Forbidden import name: {alias.name}"
+
+
+def test_indexed_command_matcher_contract() -> None:
+    """Generic IndexedCommandMatcher provides explicit hints and delegates matching."""
+
+    class _DummyMatcher:
+        def match(self, command):
+            return (MatcherEvidence(segment_index=0, executable=command.segments[0].executable, detail="dummy"),)
+
+    dummy = _DummyMatcher()
+    indexed = IndexedCommandMatcher(
+        matcher=dummy,
+        executables=frozenset({" Tool-A ", "TOOL-B"}),
+        keywords=frozenset({" Key-1 ", "KEY-2"}),
+    )
+
+    assert indexed.executables == frozenset({"tool-a", "tool-b"})
+    assert indexed.keywords == frozenset({"key-1", "key-2"})
+
+    hints = matcher_index_hints(indexed)
+    assert hints.complete is True
+    assert hints.executables == frozenset({"tool-a", "tool-b"})
+    assert hints.keywords == frozenset({"key-1", "key-2"})
+
+    cmd = parse_shell_command("tool-a key-1")
+    evidence = indexed.match(cmd)
+    assert len(evidence) == 1
+    assert evidence[0].detail == "dummy"
+
+
+def test_ai_dev_candidate_indexing_filters_unrelated_commands() -> None:
+    """Registry candidate indexing filters out ai-dev rules for unrelated commands."""
+    for cmd in ("git status", "npm test", "cargo build", "docker ps"):
+        candidate_ids = BUILT_IN_COMMAND_EXTENSION_REGISTRY.candidate_rule_ids(parse_shell_command(cmd))
+        ai_dev_candidates = [rid for rid in candidate_ids if rid.startswith("command.ai-dev.")]
+        assert not ai_dev_candidates, f"Unexpected ai-dev candidates for {cmd!r}: {ai_dev_candidates}"
+
+    # Relevant ai-dev commands ARE indexed as candidates
+    daemon_candidates = BUILT_IN_COMMAND_EXTENSION_REGISTRY.candidate_rule_ids(
+        parse_shell_command("ai-dev index daemon start")
+    )
+    assert "command.ai-dev.index-daemon-start" in daemon_candidates
+
+    install_candidates = BUILT_IN_COMMAND_EXTENSION_REGISTRY.candidate_rule_ids(
+        parse_shell_command("ai-dev integrations install --force")
+    )
+    assert "command.ai-dev.integrations-install-force" in install_candidates

@@ -245,11 +245,6 @@ def structured_matcher_index_hints(matcher: CommandMatcher) -> tuple[frozenset[s
     framework_hints = framework_matcher_index_hints(matcher)
     if framework_hints is not None:
         return framework_hints
-    from .command_ai_dev_extensions import ai_dev_matcher_index_hints
-
-    ai_dev_hints = ai_dev_matcher_index_hints(matcher)
-    if ai_dev_hints is not None:
-        return ai_dev_hints
     if isinstance(matcher, LeadingOperandCountMatcher):
         return matcher.executables, frozenset()
     if isinstance(matcher, SubcommandOperandPrefixMatcher):
