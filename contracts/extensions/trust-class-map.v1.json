@@ -81,6 +81,7 @@
       "command.ai-dev",
       "command.blitcp",
       "command.mcp-filesystem",
+      "command.mcp-instapods",
       "command.noodle",
       "command.ollama",
       "command.probe",

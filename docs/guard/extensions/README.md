@@ -4,9 +4,18 @@ HOL Guard 3 groups command protection into inspectable Extensions. Each Extensio
 its rule metadata, safer alternatives, and the evidence it contributes to Guard's policy decision. Extensions detect
 and explain command facts; they do not grant authority, execute commands, or replace Guard policy.
 
-Use this directory to discover the built-in coverage shipped by the current source tree. The tables are generated
-from the same validated registry used by runtime hooks, `command explain`, the local dashboard, and catalog APIs, so
-the documentation cannot silently drift from the product.
+Use this directory to discover coverage shipped by the current source tree.
+The tables are generated from the catalog compiled by Rust from canonical JSON
+sources. `command explain`, the local dashboard, and catalog APIs read the same
+generated metadata; the native program owns command matching. Directory checks
+verify that the tables match that catalog.
+
+To add or update coverage, start with the [contribution guide](contributing.md)
+and [native source workflow](../extension-contributions.md). Edit
+`contributions/command-sources/command.<name>.json`, add portable fixtures, and
+regenerate the projections. New Python detector modules are not the contribution
+path. The [Extension Builder](../extension-builder/README.md) can create a review
+kit from an exported CLI inventory or MCP tool list.
 
 ```bash
 # List every Extension.
@@ -22,8 +31,9 @@ hol-guard command explain 'git reset --hard HEAD~1'
 Protection model meanings:
 
 - **Required core**: an immutable minimum protection floor shipped by HOL Guard.
-- **Built in**: a reviewed detector in the canonical local registry.
+- **Built in**: reviewed native coverage in the compiled catalog.
 - **Package Firewall**: package operations delegated to Guard's supply-chain enforcement surface.
+- **External opt-in**: a contributed extension that remains off until enabled through Guard's controls.
 
 <!-- BEGIN GENERATED EXTENSION DIRECTORY -->
 
@@ -124,13 +134,14 @@ Protection model meanings:
 | Extension | What it protects | Rules | Protection model |
 | :--- | :--- | ---: | :--- |
 | `command.mcp-filesystem` | Reviews official filesystem MCP tools. Off until you turn it on. | 0 | External opt-in |
+| `command.mcp-instapods` | Reviews sensitive InstaPods pod, billing, command execution, and file-write tools for the official hosted MCP server. | 0 | External opt-in |
 | `command.skill-sunset` | Reviews the canonical Skill Sunset audit surface and its local report and viewer side effects. Experiment execution and npm launcher policy remain outside this extension. | 1 | External opt-in |
 
 ### Other extensions
 
 | Extension | What it protects | Rules | Protection model |
 | :--- | :--- | ---: | :--- |
-| `command.ai-dev` | Reviews ai-dev commands that force-overwrite IDE configurations, manage background index daemons, or mutate multi-agent task locks. | 5 | External opt-in |
+| `command.ai-dev` | Detects sensitive ai-dev CLI operations and provides structured evidence for policy review. | 5 | External opt-in |
 | `command.blitcp` | Reviews blitcp copies that leave the host, elevate privileges, or skip verification. | 4 | External opt-in |
 | `command.framework.laravel` | Reviews destructive Artisan database wipes, migration resets, and queue purges. | 5 | Built in |
 | `command.noodle` | Reviews request and collection execution through the Noodle terminal REST client. | 1 | External opt-in |
