@@ -89,6 +89,10 @@ jobs:
           components: rustfmt
       - name: Check native formatting before compilation
         run: cargo fmt --manifest-path rust/Cargo.toml --all --check
+      - name: Stage external trust defaults and matching Python resource
+        run: |
+          python3 scripts/refresh_extension_artifacts.py --trust-only
+          cp contracts/extensions/trust-class-map.v1.json src/codex_plugin_scanner/guard/contracts/data/extensions/trust-class-map.v1.json
       - name: Build native command evaluators once for pytest shards
         run: |
           cargo build --manifest-path rust/Cargo.toml --locked --release -p guard-command -p hol-guard-runtime --bin guard-command-source --bin hol-guard-runtime
