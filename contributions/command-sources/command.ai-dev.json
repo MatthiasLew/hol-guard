@@ -72,7 +72,7 @@
         "label": "ai-dev background index daemon start",
         "permission_id": "command.ai-dev.permission.index-daemon-start",
         "replacement_permission_id": null,
-        "risk_tier": "high",
+        "risk_tier": "medium",
         "safer_guidance": [
           "Run indexing in the foreground or check daemon status before starting."
         ],
@@ -98,7 +98,7 @@
         "label": "ai-dev background index daemon termination",
         "permission_id": "command.ai-dev.permission.index-daemon-stop",
         "replacement_permission_id": null,
-        "risk_tier": "high",
+        "risk_tier": "medium",
         "safer_guidance": [
           "Check index daemon status before stopping."
         ],
@@ -124,7 +124,7 @@
         "label": "ai-dev agent task lock acquisition",
         "permission_id": "command.ai-dev.permission.agents-claim",
         "replacement_permission_id": null,
-        "risk_tier": "high",
+        "risk_tier": "medium",
         "safer_guidance": [
           "Inspect pending tasks with ai-dev agents list before claiming."
         ],
@@ -150,7 +150,7 @@
         "label": "ai-dev agent task lock release",
         "permission_id": "command.ai-dev.permission.agents-release",
         "replacement_permission_id": null,
-        "risk_tier": "high",
+        "risk_tier": "low",
         "safer_guidance": [
           "Verify task status with ai-dev agents list before releasing locks."
         ],
@@ -5694,7 +5694,7 @@
         "safer_alternatives": [
           "Run indexing in the foreground or check daemon status before starting."
         ],
-        "severity": "high",
+        "severity": "medium",
         "title": "ai-dev background index daemon start"
       },
       {
@@ -6600,7 +6600,7 @@
         "safer_alternatives": [
           "Check index daemon status before stopping."
         ],
-        "severity": "high",
+        "severity": "medium",
         "title": "ai-dev background index daemon termination"
       },
       {
@@ -7578,7 +7578,7 @@
         "safer_alternatives": [
           "Inspect pending tasks with ai-dev agents list before claiming."
         ],
-        "severity": "high",
+        "severity": "medium",
         "title": "ai-dev agent task lock acquisition"
       },
       {
@@ -8532,7 +8532,7 @@
         "safer_alternatives": [
           "Verify task status with ai-dev agents list before releasing locks."
         ],
-        "severity": "high",
+        "severity": "low",
         "title": "ai-dev agent task lock release"
       }
     ],
@@ -8546,4 +8546,3 @@
   },
   "schema": "guard.command-extension-source.v1"
 }
-
