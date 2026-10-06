@@ -46,7 +46,8 @@ def test_disabled_cli_evidence_failure_never_changes_denial(
         runtime_workspace=None,
         store=store,
     )
-    assert status == 0
+    # opencode is rc-driven: its pretool plugin maps exitCode 1 -> block.
+    assert status == 1
     assert responses[0]["policy_action"] == "block"
     assert responses[0]["hookSpecificOutput"]["permissionDecision"] == "deny"
     if failure != "start":
@@ -140,6 +141,9 @@ def test_outage_mode_requires_authenticated_unexpired_snapshot(
             runtime_workspace=None,
             store=store,
         )
+        # codex denies via the hookSpecificOutput.permissionDecision envelope;
+        # rc stays 0 whether the outage resolves allow (observe+acked snapshot)
+        # or deny, because a nonzero rc would read as a hook error and permit.
         assert status == 0
         assert len(responses) == 1
         response = responses[0]
