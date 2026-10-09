@@ -11210,10 +11210,27 @@ def test_guard_hook_emits_json_for_claude_user_prompt_submit_overridable_prompts
     )
 
     assert rc == 0
-    assert output["continue"] is True
-    assert output["policy_action"] == "require-reapproval"
-    assert output["artifact_id"].startswith("claude-code:session:prompt")
-    assert output["risk_summary"]
+    # The resident emits the native prompt contract, not the legacy artifact envelope.
+    assert output["decision"] == "block", output
+    assert output["policy_action"] == "require-reapproval", output
+    assert output["reason_code"] == "native_sensitive_prompt", output
+    assert output["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert output["reason"]
+    assert any("local .env file" in signal for signal in output["risk_signals"])
+    assert event["prompt"] not in json.dumps(output)
+
+    store = GuardStore(home_dir)
+    with store._connect() as connection:
+        row = connection.execute("select decision_id from native_prompt_decision_receipts").fetchone()
+    assert row is not None
+    receipt = store.get_native_decision_receipt(row["decision_id"])
+    assert receipt is not None
+    assert receipt["event_name"] == "UserPromptSubmit"
+    assert receipt["decision"] == "deny"
+    assert receipt["policy_action"] == "require-reapproval"
+    assert receipt["reason_code"] == output["reason_code"]
+    assert "local_env_read" in receipt["prompt_risk_classes"]
+    assert event["prompt"] not in json.dumps(receipt)
 
 
 def test_guard_hook_emits_claude_user_prompt_submit_block_reason_without_continue_guidance(
