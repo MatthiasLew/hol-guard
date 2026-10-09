@@ -195,6 +195,7 @@ jobs:
       - name: Stage external trust defaults and matching Python resource
         run: |
           python3 scripts/refresh_extension_artifacts.py --trust-only
+          mkdir -p src/codex_plugin_scanner/guard/contracts/data/extensions
           cp contracts/extensions/trust-class-map.v1.json src/codex_plugin_scanner/guard/contracts/data/extensions/trust-class-map.v1.json
       - name: Build native command evaluators once for pytest shards
         run: |
@@ -740,3 +741,4 @@ jobs:
           # residue would fail every valid fast lane.
           print("required aggregate: all planned required results green")
           PY
+
