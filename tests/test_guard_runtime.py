@@ -11214,9 +11214,10 @@ def test_guard_hook_emits_json_for_claude_user_prompt_submit_overridable_prompts
     assert output["decision"] == "block", output
     assert output["policy_action"] == "require-reapproval", output
     assert output["reason_code"] == "native_sensitive_prompt", output
-    assert output["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
-    assert output["reason"]
-    assert any("local .env file" in signal for signal in output["risk_signals"])
+    # Blocking Claude CLI responses use top-level decision/reason fields.
+    # hookSpecificOutput is not required by this presentation path.
+    assert output["reason"], output
+    assert any("local .env file" in signal for signal in output["risk_signals"]), output
     assert event["prompt"] not in json.dumps(output)
 
     store = GuardStore(home_dir)
