@@ -11126,7 +11126,7 @@ def test_guard_hook_emits_json_for_claude_user_prompt_submit_overridable_prompts
     )
 
     assert rc == 0
-    # The resident emits the native prompt contract, not the legacy artifact envelope.
+    # --json combines the blocking response with the local approval record.
     assert output["decision"] == "block", output
     assert output["policy_action"] == "require-reapproval", output
     assert output["reason_code"] == "native_sensitive_prompt", output
@@ -11134,7 +11134,17 @@ def test_guard_hook_emits_json_for_claude_user_prompt_submit_overridable_prompts
     # hookSpecificOutput is not required by this presentation path.
     assert output["reason"], output
     assert any("local .env file" in signal for signal in output["risk_signals"]), output
-    assert event["prompt"] not in json.dumps(output)
+    # The approval record retains the request for review; the blocking copy
+    # and native decision receipt must not echo the submitted prompt.
+    assert event["prompt"] not in output["reason"]
+    assert event["prompt"] not in json.dumps(output["risk_signals"])
+    approval = next(
+        request
+        for request in output["approval_requests"]
+        if request["request_id"] == output["primary_approval_request_id"]
+    )
+    assert approval["status"] == "pending"
+    assert approval["action_envelope_json"]["prompt_text"] == event["prompt"]
 
     store = GuardStore(home_dir)
     with store._connect() as connection:
@@ -14628,10 +14638,10 @@ def test_runtime_hook_saved_v1_allow_matches_every_scope_in_actual_evaluator(tmp
     # asserted hook call. The digest result is intentionally unused: it is a
     # best-effort warm, and a None (transport/startup failure) must not mask the
     # real call - which runs next and is what the asserts actually exercise.
+    from codex_plugin_scanner.guard.native_context import native_context_digest
     from codex_plugin_scanner.guard.native_policy_snapshot_publisher import (
         provision_native_verifier_key_for_store,
     )
-    from codex_plugin_scanner.guard.native_context import native_context_digest
 
     provision_native_verifier_key_for_store(store)
     native_context_digest(
